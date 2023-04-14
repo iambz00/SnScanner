@@ -1,0 +1,5 @@
+*.bak
+*/*
+pyvenv.cfg
+.gitignore
+*.xlsx

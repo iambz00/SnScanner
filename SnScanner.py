@@ -47,6 +47,10 @@ class TextScanner:
             self.worksheet.column_dimensions[column[0].column_letter].width = length * 1.2
         self.worksheet.column_dimensions['B'].width = 24
 
+        # 시리얼번호는 고정폭인 Consolas로 설정
+        consolas = openpyxl.styles.Font(name="Consolas")
+        for cell in self.worksheet['C:C']: cell.font = consolas
+        for cell in self.worksheet['D:D']: cell.font = consolas
         self.workbook.save(self.output_file)
     def scan_tesseract(self, file):
         '''
@@ -140,9 +144,15 @@ if __name__ == "__main__":
     parser.add_argument("-o", metavar="파일명", help="출력 파일명. 기본값: ouput_날짜시간.xlsx", default=OUTPUT_FILE,
                         dest="output_file")
     args = parser.parse_args()
+    tesseract_path = args.tesseract_path.replace("\\", "\\\\")
+    output_file = args.output_file.replace("\\", "\\\\")
 
     if not os.path.exists(args.path):
         print(f"[{args.path}] 폴더가 존재하지 않습니다.")
-    else:
-        ts = TextScanner(args.path, tesseract_path=args.tesseract_path, output_file=args.output_file)
-        ts.scan()
+        exit(1)
+    if not os.path.exists(tesseract_path):
+        print(f"[{tesseract_path}] 경로에 Tesseract가 없습니다.")
+        exit(2)
+
+    ts = TextScanner(args.path, tesseract_path=args.tesseract_path, output_file=args.output_file)
+    ts.scan()
