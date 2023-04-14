@@ -1,8 +1,9 @@
 import os, sys, re, time
 import cv2, pytesseract
 import numpy as np
+from openpyxl import Workbook
 
-_VERSION = "20230413"
+_VERSION = "20230414"
 TESSERACT_PATH = "C:/Program Files/Tesseract-OCR/tesseract.exe"
 
 class TextScanner:
@@ -97,7 +98,7 @@ def s(*imgs, title='test'):
 if __name__ == "__main__":
     image_dir = "img"
     sn_only = False
-    if sys.argv == 1:
+    if len(sys.argv) == 1:
         print("SnScanner [-s] [directory]")
     else:
         for i in range(1, len(sys.argv)):
@@ -105,5 +106,8 @@ if __name__ == "__main__":
                 sn_only = True
             else:
                 image_dir = sys.argv[i]
-        ts = TextScanner(image_dir, sn_only=sn_only)
-        ts.scan()
+        if os.path.exists(image_dir):
+            ts = TextScanner(image_dir, sn_only=sn_only)
+            ts.scan()
+        else:
+            print(f"[{image_dir}] 폴더가 존재하지 않습니다.")
