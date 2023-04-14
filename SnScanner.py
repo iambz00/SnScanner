@@ -2,10 +2,13 @@ import os, sys, re, time
 import cv2, pytesseract
 import numpy as np
 import openpyxl
+import argparse
 from PIL import Image as PILImage
 
 _VERSION = "20230414"
 TESSERACT_PATH = "C:/Program Files/Tesseract-OCR/tesseract.exe"
+OUTPUT_FILE = f"output_{time.strftime('%Y%m%d%H%M%S')}.xlsx"
+SERIAL_PATTERN = r'R[A-Z0-9]{10}'
 '''
 삼성 시리얼번호 규칙
 
@@ -21,24 +24,21 @@ T는 "Year Code"를 나타내며, 해당 제품이 2021년에 생산된 것을 �
 
 '''
 class TextScanner:
-    def __init__(self, work_dir, sn_only=False):
-        pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
+    def __init__(self, work_dir, tesseract_path=TESSERACT_PATH, output_file=OUTPUT_FILE):
+        pytesseract.pytesseract.tesseract_cmd = tesseract_path
         self.dir = work_dir
-        self.sn_only = sn_only
+
         self.workbook = openpyxl.Workbook()
         self.worksheet = self.workbook.active
 
         # 결과 파일명
-        date_time = time.strftime("%Y%m%d%H%M%S")
-        self.output_file = f"output_{date_time}.xlsx"
-
+        self.output_file = output_file
     def scan(self):
         files = os.listdir(self.dir)
         self.worksheet.append(["파일명", "이미지", "1차인식", "2차인식", "특이사항"])
         self.workrow = 2    # 엑셀 현재 행
         for file in files:
-            if not self.sn_only:
-                print("* " + file)
+            print("* " + file)
             self.scan_tesseract(file)
 
         # 컬럼 폭 조정
@@ -67,11 +67,9 @@ class TextScanner:
         sn_candidate = []
         for i in range(len(texts)):
             # 시리얼 형식에 맞는 결과 검색
-            match = re.search(r'R[A-Z0-9]{10}', texts[i])
+            match = re.search(SERIAL_PATTERN, texts[i])
             if match:
                 text = match.group(0).replace("O","0") # 모든 O는 0으로 강제 변환
-                #if text[1] == "S":  # 두번째 나오는 S는 5로 강제 변환
-                #    text = text[:1] + "5" + text[2:]
 
                 # Bounding box를 구한다 - left, top, width, height
                 l,t,w,h = result['left'][i], result['top'][i], result['width'][i], result['height'][i]
@@ -92,10 +90,10 @@ class TextScanner:
                 newtext = pytesseract.image_to_string(cont, lang="eng", config='--oem 3 --psm 7').strip().replace("O","0").replace("\n","")
                 if len(newtext) > 2 and newtext[1] == "S":
                     newtext = newtext[:1] + "5" + newtext[2:]
-                newmatch = re.search(r'R[S5][A-Z0-9]{9}', newtext)
+                newmatch = re.search(SERIAL_PATTERN, newtext)
                 if newmatch:
                     newtext = newmatch.group(0)
-                different = (text != newtext) and "1차 2차 불일치" or ""
+                different = (text != newtext) and "1차/2차 불일치" or ""
 
                 # 출력
                 print(newtext, different)
@@ -134,28 +132,17 @@ class TextScanner:
             encoded_img.tofile(f)
             f.close()
 
-def s(*imgs, title='test'):
-    i = 1
-    for img in imgs:
-        print(i)
-        cv2.imshow(title + str(i), img)
-        i += 1
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
 if __name__ == "__main__":
-    image_dir = "img"
-    sn_only = False
-    if len(sys.argv) == 1:
-        print("SnScanner [-s] [directory]")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("path", metavar="경로", help="대상 이미지가 있는 폴더")
+    parser.add_argument("-t", metavar="Tesseract경로", help=f"Teserract 위치. 기본값: {TESSERACT_PATH}", default=TESSERACT_PATH,
+                        dest="tesseract_path")
+    parser.add_argument("-o", metavar="파일명", help="출력 파일명. 기본값: ouput_날짜시간.xlsx", default=OUTPUT_FILE,
+                        dest="output_file")
+    args = parser.parse_args()
+
+    if not os.path.exists(args.path):
+        print(f"[{args.path}] 폴더가 존재하지 않습니다.")
     else:
-        for i in range(1, len(sys.argv)):
-            if sys.argv[i] == "-s":
-                sn_only = True
-            else:
-                image_dir = sys.argv[i]
-        if os.path.exists(image_dir):
-            ts = TextScanner(image_dir, sn_only=sn_only)
-            ts.scan()
-        else:
-            print(f"[{image_dir}] 폴더가 존재하지 않습니다.")
+        ts = TextScanner(args.path, tesseract_path=args.tesseract_path, output_file=args.output_file)
+        ts.scan()
