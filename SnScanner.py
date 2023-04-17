@@ -24,9 +24,10 @@ T는 "Year Code"를 나타내며, 해당 제품이 2021년에 생산된 것을 �
 
 '''
 class TextScanner:
-    def __init__(self, work_dir, tesseract_path=TESSERACT_PATH, output_file=OUTPUT_FILE):
+    def __init__(self, work_dir, tesseract_path=TESSERACT_PATH, output_file=OUTPUT_FILE, pattern=SERIAL_PATTERN):
         pytesseract.pytesseract.tesseract_cmd = tesseract_path
         self.dir = work_dir
+        self.pattern = pattern
 
         self.workbook = openpyxl.Workbook()
         self.worksheet = self.workbook.active
@@ -63,6 +64,13 @@ class TextScanner:
         image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
         # 그레이스케일로 변환
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        # Gaussian Blur 적용 - 태블릿 화면을 찍었기 때문에 필수 과정
+        gray = np.clip((1+alpha)*gray - 128*alpha, 0, 255).astype(np.uint8)
+        #gray = cv2.GaussianBlur(gray, (3,3), 0)
+        gray = cv2.bilateralFilter(gray, 3, 8, 8)
+        #w, h = gray.shape[1], gray.shape[0]
+        #gray = cv2.resize(gray, (w//2, h//2), cv2.INTER_LANCZOS4)
+        #gray = np.clip((1+alpha)*gray - 128*alpha, 0, 255).astype(np.uint8)
 
         # 1차 인식
         result = pytesseract.image_to_data(gray, lang="eng+kor", output_type=pytesseract.Output().DICT, config='--oem 3 --psm 11')
@@ -71,7 +79,7 @@ class TextScanner:
         sn_candidate = []
         for i in range(len(texts)):
             # 시리얼 형식에 맞는 결과 검색
-            match = re.search(SERIAL_PATTERN, texts[i])
+            match = re.search(self.pattern, texts[i])
             if match:
                 text = match.group(0).replace("O","0") # 모든 O는 0으로 강제 변환
 
@@ -94,7 +102,7 @@ class TextScanner:
                 newtext = pytesseract.image_to_string(cont, lang="eng", config='--oem 3 --psm 7').strip().replace("O","0").replace("\n","")
                 if len(newtext) > 2 and newtext[1] == "S":
                     newtext = newtext[:1] + "5" + newtext[2:]
-                newmatch = re.search(SERIAL_PATTERN, newtext)
+                newmatch = re.search(self.pattern, newtext)
                 if newmatch:
                     newtext = newmatch.group(0)
                 different = (text != newtext) and "1차/2차 불일치" or ""
@@ -129,12 +137,6 @@ class TextScanner:
             return pil_image
         else:
             return None
-    def imwrite(self, img, file):
-        result, encoded_img = cv2.imencode(os.path.splitext(file)[1], img)
-        if result:
-            f = open(self.output_dir + "/확인_" + file, mode="w+b")
-            encoded_img.tofile(f)
-            f.close()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -143,9 +145,12 @@ if __name__ == "__main__":
                         dest="tesseract_path")
     parser.add_argument("-o", metavar="파일명", help="출력 파일명. 기본값: ouput_날짜시간.xlsx", default=OUTPUT_FILE,
                         dest="output_file")
+    parser.add_argument("-p", metavar="패턴", help=f"검출 패턴(Python 정규식) 기본값: 태블릿 시리얼 검출용 '{SERIAL_PATTERN}'", default=SERIAL_PATTERN,
+                        dest="pattern")
     args = parser.parse_args()
     tesseract_path = args.tesseract_path.replace("\\", "\\\\")
     output_file = args.output_file.replace("\\", "\\\\")
+    pattern = args.pattern.replace("\\", "\\\\")
 
     if not os.path.exists(args.path):
         print(f"[{args.path}] 폴더가 존재하지 않습니다.")
@@ -154,5 +159,5 @@ if __name__ == "__main__":
         print(f"[{tesseract_path}] 경로에 Tesseract가 없습니다.")
         exit(2)
 
-    ts = TextScanner(args.path, tesseract_path=args.tesseract_path, output_file=args.output_file)
+    ts = TextScanner(args.path, tesseract_path=tesseract_path, output_file=output_file, pattern=pattern)
     ts.scan()
