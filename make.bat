@@ -1,0 +1,1 @@
+pyinstaller --noconfirm --onedir --console --icon "D:/git/SnScanner/deploy/tablet.ico" --upx-dir "D:/git/pycompile/upx-4.0.2-win64" --paths "D:/git/SnScanner/Lib/site-packages" --add-data "D:/git/SnScanner/D2Coding-01.ttf;." --dist "D:/git/SnScanner/Deploy" "D:/git/SnScanner/SnScanner.py"

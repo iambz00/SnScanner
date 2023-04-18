@@ -4,8 +4,9 @@ import numpy as np
 import openpyxl
 import argparse
 from PIL import Image as PILImage
+from PIL import ImageFont, ImageDraw
 
-_VERSION = "20230414"
+_VERSION = "20230418"
 TESSERACT_PATH = "C:/Program Files/Tesseract-OCR/tesseract.exe"
 OUTPUT_FILE = f"output_{time.strftime('%Y%m%d%H%M%S')}.xlsx"
 SERIAL_PATTERN = r'R[A-Z0-9]{10}'
@@ -23,11 +24,18 @@ T는 "Year Code"를 나타내며, 해당 제품이 2021년에 생산된 것을 �
 따라서, 해당 S/N인 R54T1067RRR은 2021년 10월 한국 내에서 생산된 삼성 테블릿 제품이며, 해당 제품의 일련번호는 RRR입니다.
 
 '''
-class TextScanner:
-    def __init__(self, work_dir, tesseract_path=TESSERACT_PATH, output_file=OUTPUT_FILE, pattern=SERIAL_PATTERN):
+class SnScanner:
+    def __init__(self, work_dir, tesseract_path="", output_file="", pattern="", interact=False):
         pytesseract.pytesseract.tesseract_cmd = tesseract_path
         self.dir = work_dir
         self.pattern = pattern
+        self.interact = interact
+        if self.interact:
+            from PIL import ImageGrab
+            self.screenW, self.screenH = ImageGrab.grab().size
+            del ImageGrab
+            file_dir = os.path.abspath(os.path.dirname(sys.argv[0]))
+            self.font = ImageFont.truetype(os.path.join(file_dir, 'D2Coding-01.ttf'), 16)
 
         self.workbook = openpyxl.Workbook()
         self.worksheet = self.workbook.active
@@ -35,12 +43,12 @@ class TextScanner:
         # 결과 파일명
         self.output_file = output_file
     def scan(self):
-        files = os.listdir(self.dir)
         self.worksheet.append(["파일명", "이미지", "1차인식", "2차인식", "특이사항"])
         self.workrow = 2    # 엑셀 현재 행
-        for file in files:
-            print("* " + file)
-            self.scan_tesseract(file)
+        for entry in os.scandir(self.dir):
+            if entry.is_file() and not entry.name.startswith('.'):
+                print("* " + entry.name)
+                self.scan_tesseract(entry.name)
 
         # 컬럼 폭 조정
         for column in self.worksheet.columns:
@@ -62,20 +70,56 @@ class TextScanner:
         # cv2.imread 는 한글 파일을 읽지 못함
         image_array = np.fromfile(self.dir + '\\' + file, np.uint8)
         image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+
+        if type(image).__name__.lower() == "NoneType".lower():
+            print("사진이 아닙니다.")
+            return
+
         # 그레이스케일로 변환
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        # Gaussian Blur 적용 - 태블릿 화면을 찍었기 때문에 필수 과정
-        gray = np.clip((1+alpha)*gray - 128*alpha, 0, 255).astype(np.uint8)
-        #gray = cv2.GaussianBlur(gray, (3,3), 0)
-        gray = cv2.bilateralFilter(gray, 3, 8, 8)
+
+        # Gaussian Blur 적용 - 태블릿 화면의 격자를 완화
+        gray = cv2.GaussianBlur(gray, (5,5), 0)
+        # Bilaternal Filter 적용 - 격자 완화 + 외곽선 강화
+        gray = cv2.bilateralFilter(gray, 15, 15, 15)
+        # 1. Contrast 증가는 별 의미가 없다
+        #gray = np.clip((1+alpha)*gray - 128*alpha, 0, 255).astype(np.uint8)
+        # 2. Thresholding도 별 의미가 없다
+        #r, gray = cv2.threshold(gray, -1, 255, cv2.THRESH_OTSU)
+        # 3. resizing도 마찬가지로...
         #w, h = gray.shape[1], gray.shape[0]
         #gray = cv2.resize(gray, (w//2, h//2), cv2.INTER_LANCZOS4)
-        #gray = np.clip((1+alpha)*gray - 128*alpha, 0, 255).astype(np.uint8)
 
         # 1차 인식
         result = pytesseract.image_to_data(gray, lang="eng+kor", output_type=pytesseract.Output().DICT, config='--oem 3 --psm 11')
         texts = result['text']
 
+        # Bounding box 표시
+        if self.interact:
+            WIDTH, HEIGHT = int(0.8 * self.screenW), int(0.8 * self.screenH)
+            h, w = gray.shape
+            f = min(HEIGHT / h, WIDTH / w, 1)
+            if f < 1:
+                shot = cv2.resize(gray, (int(f * w), int(f * h)), cv2.INTER_LANCZOS4)
+            else:
+                shot = gray.copy()
+            shot = cv2.cvtColor(shot, cv2.COLOR_GRAY2BGR)
+            for i in range(len(texts)):
+                if texts[i] and result['conf'][i] > 30:
+                    l,t,w,h = result['left'][i], result['top'][i], result['width'][i], result['height'][i]
+                    box = np.array([[l,t], [l+w,t], [l+w,t+h], [l,t+h]])
+                    box = np.array(f * box, np.int32)
+                    conf = result['conf'][i] / 100
+                    b, g, r = int((1-conf)*128), int((1-conf)*128), int(conf*255)
+                    cv2.polylines(shot, [box], True, (b, g, r), 1)
+                    pil_shot = PILImage.fromarray(shot)
+                    draw = ImageDraw.Draw(pil_shot)
+                    draw.text((box[0,0], box[0,1]), texts[i], font=self.font, fill=(b,g,r,0))
+                    shot = np.array(pil_shot, np.uint8)
+                    #cv2.putText(shot, texts[i], (box[0,0], box[0,1]+18), cv2.FONT_HERSHEY_DUPLEX, 0.5, (b, g, r), 1)
+            self.imshow(shot, title=file)
+
+        # 2차 인식
         sn_candidate = []
         for i in range(len(texts)):
             # 시리얼 형식에 맞는 결과 검색
@@ -88,17 +132,22 @@ class TextScanner:
                 print(text + " > ", end="", flush=True)
 
                 # Bounding box 외부로 여유공간이 있어야 인식이 잘 되므로
-                # 좌 4px, 상 4px 만큼 바운딩박스를 키우고
-                crop = gray[max(0, t-4):t+h, max(0, l-4):l+w]
+                # 상하좌우 4px 씩 더 가져온 후
+                image_height, image_width = gray.shape
+                crop = gray[max(0, t-4):min(t+h+4, image_height-1), max(0, l-4):min(l+w+4, image_width-1)]
                 rows, cols = crop.shape
                 # 좌상단 픽셀과 같은 색으로 외부를 32픽셀씩 둘러싸 준다
                 newpage = crop[0,0] * np.ones( (rows+64)*(cols+64), np.uint8).reshape(rows+64, cols+64)
                 for y in range(rows):
                     for x in range(cols):
                         newpage[y+32, x+32] = crop[y, x]
+                # 추가로 전처리를 할 수록 인식율이 떨어지므로 가만 놔두자...
                 # 대비(Contrast)를 준다
-                cont = np.clip((1+alpha)*newpage - 128*alpha, 0, 255).astype(np.uint8)
-                # 2차 인식
+                #cont = np.clip((1+alpha)*newpage - 128*alpha, 0, 255).astype(np.uint8)
+                # OTSU 방식으로 Thresholding
+                #r, thres = cv2.threshold(newpage, -1, 255, cv2.THRESH_OTSU)
+                cont = newpage
+                # 인식
                 newtext = pytesseract.image_to_string(cont, lang="eng", config='--oem 3 --psm 7').strip().replace("O","0").replace("\n","")
                 if len(newtext) > 2 and newtext[1] == "S":
                     newtext = newtext[:1] + "5" + newtext[2:]
@@ -137,17 +186,29 @@ class TextScanner:
             return pil_image
         else:
             return None
+    def imshow(self, *imgs, title='test'):
+        i = 1
+        for img in imgs:
+            if title == "test":
+                title += str(i)
+            cv2.imshow(title, img)
+            i += 1
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(usage="%(prog)s [옵션] 경로")
     parser.add_argument("path", metavar="경로", help="대상 이미지가 있는 폴더")
     parser.add_argument("-t", metavar="Tesseract경로", help=f"Teserract 위치. 기본값: {TESSERACT_PATH}", default=TESSERACT_PATH,
                         dest="tesseract_path")
     parser.add_argument("-o", metavar="파일명", help="출력 파일명. 기본값: ouput_날짜시간.xlsx", default=OUTPUT_FILE,
                         dest="output_file")
-    parser.add_argument("-p", metavar="패턴", help=f"검출 패턴(Python 정규식) 기본값: 태블릿 시리얼 검출용 '{SERIAL_PATTERN}'", default=SERIAL_PATTERN,
-                        dest="pattern")
-    args = parser.parse_args()
+    parser.add_argument("-p", metavar="패턴", help=f"검출 패턴(Python 정규식) 기본값: 태블릿 시리얼 검출용 '{SERIAL_PATTERN}'",
+                        default=SERIAL_PATTERN, dest="pattern")
+    parser.add_argument("-i", help="각 파일마다 인식 영역과 문자를 확인하면서 넘어갑니다.", action="store_true",
+                        dest="interact")
+    args = parser.parse_args(args=None if sys.argv[1:] else ['-h'])
+
     tesseract_path = args.tesseract_path.replace("\\", "\\\\")
     output_file = args.output_file.replace("\\", "\\\\")
     pattern = args.pattern.replace("\\", "\\\\")
@@ -159,5 +220,5 @@ if __name__ == "__main__":
         print(f"[{tesseract_path}] 경로에 Tesseract가 없습니다.")
         exit(2)
 
-    ts = TextScanner(args.path, tesseract_path=tesseract_path, output_file=output_file, pattern=pattern)
-    ts.scan()
+    ss = SnScanner(args.path, tesseract_path=tesseract_path, output_file=output_file, pattern=pattern, interact=args.interact)
+    ss.scan()
