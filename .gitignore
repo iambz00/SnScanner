@@ -4,3 +4,7 @@ pyvenv.cfg
 .gitignore
 *.xlsx
 *.zip
+*.spec
+*.exe
+*.ini
+
