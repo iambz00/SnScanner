@@ -6,24 +6,11 @@ import argparse
 from PIL import Image as PILImage
 from PIL import ImageFont, ImageDraw
 
-_VERSION = "20230418"
+_VERSION = "20230421"
 TESSERACT_PATH = "C:/Program Files/Tesseract-OCR/tesseract.exe"
 OUTPUT_FILE = f"output_{time.strftime('%Y%m%d%H%M%S')}.xlsx"
 SERIAL_PATTERN = r'R[A-Z0-9]{10}'
-'''
-삼성 시리얼번호 규칙
 
-예시) R54T1067RRR
-해당 S/N의 형식은 새로운 삼성 테블릿 모델의 S/N 규칙에 따라 구성됩니다. 따라서 다음과 같은 의미를 가지게 됩니다:
-
-R은 "Region/Country Code"를 나타내며, 해당 제품이 한국에서 제조된 것을 나타냅니다.
-54는 "Location Code"를 나타내며, 해당 제품이 한국 내에서 어떤 지역에서 생산되었는지를 나타냅니다.
-T는 "Year Code"를 나타내며, 해당 제품이 2021년에 생산된 것을 나타냅니다.
-10은 "Month Code"를 나타내며, 해당 제품이 10월에 생산된 것을 나타냅니다.
-67은 "Production Code"를 나타내며, 해당 제품이 생산된 라인을 나타냅니다.
-따라서, 해당 S/N인 R54T1067RRR은 2021년 10월 한국 내에서 생산된 삼성 테블릿 제품이며, 해당 제품의 일련번호는 RRR입니다.
-
-'''
 class SnScanner:
     def __init__(self, work_dir, tesseract_path="", output_file="", pattern="", interact=False):
         pytesseract.pytesseract.tesseract_cmd = tesseract_path
@@ -46,7 +33,7 @@ class SnScanner:
         self.worksheet.append(["파일명", "이미지", "1차인식", "2차인식", "특이사항"])
         self.workrow = 2    # 엑셀 현재 행
         for entry in os.scandir(self.dir):
-            if entry.is_file() and not entry.name.startswith('.'):
+            if entry.is_file() and not entry.name.startswith('.') and not entry.name.startswith('~'):
                 print("* " + entry.name)
                 self.scan_tesseract(entry.name)
 
@@ -66,10 +53,15 @@ class SnScanner:
         1차 인식: 전체 그림에서 시리얼 넘버로 추정되는 문자열을 인식
         2차 인식: 1차 인식된 영역만 잘라내서 전처리 후 다시 인식
         '''
-        alpha = 2.0
-        # cv2.imread 는 한글 파일을 읽지 못함
-        image_array = np.fromfile(self.dir + '\\' + file, np.uint8)
-        image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+        #alpha = 2.0
+        
+        try:
+            # cv2.imread 는 한글 파일을 읽지 못함
+            image_array = np.fromfile(self.dir + '\\' + file, np.uint8)
+            image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+        except:
+            print("파일 열기 오류")
+            return
 
         if type(image).__name__.lower() == "NoneType".lower():
             print("사진이 아닙니다.")
@@ -77,25 +69,29 @@ class SnScanner:
 
         # 그레이스케일로 변환
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
         # Gaussian Blur 적용 - 태블릿 화면의 격자를 완화
         gray = cv2.GaussianBlur(gray, (5,5), 0)
-        # Bilaternal Filter 적용 - 격자 완화 + 외곽선 강화
+        # Bilaternal Filter 적용 - 격자 완화 + 경계선 강화
         gray = cv2.bilateralFilter(gray, 15, 15, 15)
-        # 1. Contrast 증가는 별 의미가 없다
-        #gray = np.clip((1+alpha)*gray - 128*alpha, 0, 255).astype(np.uint8)
-        # 2. Thresholding도 별 의미가 없다
-        #r, gray = cv2.threshold(gray, -1, 255, cv2.THRESH_OTSU)
-        # 3. resizing도 마찬가지로...
-        #w, h = gray.shape[1], gray.shape[0]
-        #gray = cv2.resize(gray, (w//2, h//2), cv2.INTER_LANCZOS4)
 
+        ''' 메모 - 아래 전처리는 인식율을 오히려 떨어트린다.
+        1. Contrast 증가
+        gray = np.clip((1+alpha)*gray - 128*alpha, 0, 255).astype(np.uint8)
+
+        2. Thresholding
+        r, gray = cv2.threshold(gray, -1, 255, cv2.THRESH_OTSU)
+
+        3. Resizing
+        w, h = gray.shape[1], gray.shape[0]
+        gray = cv2.resize(gray, (w//2, h//2), cv2.INTER_LANCZOS4)
+        '''
         # 1차 인식
         result = pytesseract.image_to_data(gray, lang="eng+kor", output_type=pytesseract.Output().DICT, config='--oem 3 --psm 11')
         texts = result['text']
 
         # Bounding box 표시
         if self.interact:
+            # 화면 크기의 80%보다 큰 경우 축소
             WIDTH, HEIGHT = int(0.8 * self.screenW), int(0.8 * self.screenH)
             h, w = gray.shape
             f = min(HEIGHT / h, WIDTH / w, 1)
@@ -105,18 +101,21 @@ class SnScanner:
                 shot = gray.copy()
             shot = cv2.cvtColor(shot, cv2.COLOR_GRAY2BGR)
             for i in range(len(texts)):
+                # Confidence 30% 이상인 항목에 대해서만 표시
                 if texts[i] and result['conf'][i] > 30:
                     l,t,w,h = result['left'][i], result['top'][i], result['width'][i], result['height'][i]
                     box = np.array([[l,t], [l+w,t], [l+w,t+h], [l,t+h]])
+                    # 축소한 경우 Bounding box 도 축소
                     box = np.array(f * box, np.int32)
+                    # Confidence에 따라 색상 변경 - 높을수록 빨갛게
                     conf = result['conf'][i] / 100
                     b, g, r = int((1-conf)*128), int((1-conf)*128), int(conf*255)
                     cv2.polylines(shot, [box], True, (b, g, r), 1)
+                    # 한글은 PIL로 그려야 함
                     pil_shot = PILImage.fromarray(shot)
                     draw = ImageDraw.Draw(pil_shot)
                     draw.text((box[0,0], box[0,1]), texts[i], font=self.font, fill=(b,g,r,0))
                     shot = np.array(pil_shot, np.uint8)
-                    #cv2.putText(shot, texts[i], (box[0,0], box[0,1]+18), cv2.FONT_HERSHEY_DUPLEX, 0.5, (b, g, r), 1)
             self.imshow(shot, title=file)
 
         # 2차 인식
