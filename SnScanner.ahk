@@ -149,7 +149,7 @@ Scan:
     }
     command := Format(App.Scanner . " {2}{3}{4}{5}""{1}""", image_dir, tesseract_path, output_path, search_pattern, interact)
     Log(command . "`r`n")
-    RunWait, % command
+    Run, % command
     /*
     if (open_result) {
         Loop, 10 {
