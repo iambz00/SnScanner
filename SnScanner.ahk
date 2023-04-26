@@ -6,58 +6,54 @@
 ; AHK file - UTF8 + BOM
 ; INI file - UTF8 (w/o BOM)
 ;
-
-FormatTime, start_date, , yyyyMMdd_HHmmss
 StartDir := A_WorkingDir
-DefaultOutputPath := StrReplace(StartDir . "\", "\\", "\") . "output_" . start_date . ".xlsx"
+DefaultOutputPath := StartDir
 
 SetWorkingDir, %A_ScriptDir%
-CoordMode, Pixel, Client
-CoordMode, Mouse, Client
+
+EnvGet, LocalAppData, LOCALAPPDATA
 
 Global App := {}
 App.FullName := "Serial Number Scanner GUI"
 App.ShortName := "SnScanner"
-App.Version := "20230425"
+App.Version := "20230426"
 App.WinTitle := Format("{1} v{2}", App.FullName, App.Version)
 
-App.BinPath := A_ScriptDir . "\sccore"
+App.BinPath := LocalAppData
+App.BinFile := App.BinPath . "\sccore_" . App.Version . ".exe"
+App.IniFile := App.BinPath . "\" . App.ShortName . ".ini"
 ;@Ahk2Exe-IgnoreBegin
-App.BinPath := A_ScriptDir . "\deploy\sccore"
+App.BinPath := A_ScriptDir . "\deploy"
+App.BinFile := App.BinPath . "\sccore.exe"
+App.IniFile := A_ScriptDir . "\" . App.ShortName . ".ini"
 ;@Ahk2Exe-IgnoreEnd
 
-App.Scanner := App.BinPath . "\sccore.exe"
-App.Font := App.BinPath . "\D2Coding-01.ttf"
-App.IniFile := A_ScriptDir . "\" . App.ShortName . ".ini"
-
-;App.sb := New StatusBar()
+FileInstall, deploy\sccore.exe, % App.BinFile, 1
 
 Global IniFile := App.IniFile
-
-Global hGui
-Global hwndCtrl_Log
+Global hGui, hLog
 
 ; Build Gui
 Gui, MainWindow:New, hwndhGui MinSize ;, Resize
 Gui, Font,, Malgun Gothic
 Gui, Margin, 8, 8
 
-Gui, Add, Text, xm+8 y+12 w88 Right, % "이미지 경로"
+Gui, Add, Text, xm+8 y+12 w88 Right, % "이미지 위치"
 Gui, Add, Edit, x+8 yp-3 w400 h22 vImageDir,
 Gui, Add, Button, x+2 yp-1 w48 hp+2 gSetImageDir, 찾기
-Gui, Add, Text, xm+8 y+6 w88 Right, % "Tesseract 경로"
+Gui, Add, Text, xm+8 y+6 w88 Right, % "Tesseract 위치"
 Gui, Add, Edit, x+8 yp-3 w400 h22 vTesseractPath, 
 Gui, Add, Button, x+2 yp-1 w48 hp+2 gSetTesseractPath,  찾기
-Gui, Add, Text, xm+8 y+6 w88 Right, % "출력파일 경로"
-Gui, Add, Edit, x+8 yp-3 w400 h22 vOutputPath, % DefaultOutputPath
+Gui, Add, Text, xm+8 y+6 w88 Right, % "출력파일 위치"
+Gui, Add, Edit, x+8 yp-3 w400 h22 vOutputPath, % StartDir
 Gui, Add, Button, x+2 yp-1 w48 hp+2 gSetOutputPath,  찾기
 Gui, Add, Text, xm+8 y+6 w88 Right, % "검출 패턴"
 Gui, Add, Edit, x+8 yp-3 w400 ReadOnly vPattern,
 
-Gui, Add, Radio, vPatternGroup1 gSetPattern1 xm+104 y+8, 시리얼번호
+Gui, Add, Radio, vPatternGroup1 gSetPattern1 xm+88 y+8, 시리얼(삼성)
 Gui, Add, Radio, vPatternGroup2 gSetPattern2 x+2, MAC 주소
 Gui, Add, Radio, vPatternGroup3 gSetPattern3 x+2, 기타
-Gui, Add, Edit, x+2 yp-4 w240 vUserPattern,
+Gui, Add, Edit, x+2 yp-4 w240 vUserPattern gUserPatternOnChange,
 
 Gui, Add, CheckBox, xm+88 y+8 vInteractOption, 검출 영역 확인하며 진행(-i)
 ;Gui, Add, CheckBox, xm+84 y+10 vExecResult, 완료 후 결과파일 열기(엑셀)
@@ -67,15 +63,20 @@ Gui, Add, Button, xm+16 yp-20 w60 h36 gScan, 스 캔
 ;@Ahk2Exe-IgnoreBegin
 Gui, Add, Button, x+240 yp+16 w60 h20 gRestart, 재시작
 ;@Ahk2Exe-IgnoreEnd
+
 ;Gui, Add, Text, Section xs, 로그
-;Gui, Add, Edit,  w520 r20 HwndhwndCtrl_Log ReadOnly vCtrl_Log
+Gui, Add, Edit, xs w536 r8 HwndhLog ReadOnly vCtrl_Log
 
 Gui, Show,, % App.WinTitle
 
 GoSub Initialize
 
-Log("SnScanner")
-Log(DefaultOutputPath)
+Log("태블릿의 시리얼 번호를 찍은 사진에서 시리얼 번호를 추출합니다.")
+Log("1. Tesseract가 설치되어 있어야 합니다.")
+Log("2. 이미지가 모여 있는 폴더 단위로 동작합니다.")
+Log("3. 결과는 스캔 완료 후 엑셀파일로 정리되어 확인할 수 있습니다.")
+Log("4. 검출 패턴은 Python 정규식 패턴입니다.(\ 1개만 사용)")
+Log("")
 
 Return
 
@@ -98,7 +99,7 @@ Return
 
 SetOutputPath:
     GuiControlGet, output_path, , OutputPath
-    FileSelectFile, file, 2, %output_path%, 결과파일 지정, *.xlsx
+    FileSelectFolder, file, 2, %output_path%, 결과파일 위치, *.xlsx
     if (file) {
         file .= ".xlsx"
         file := StrReplace(file, ".xlsx.xlsx", ".xlsx")
@@ -118,8 +119,11 @@ Return
 
 SetPattern3:
     App.PatternGroup := 3
-    GuiControlGet, user_pattern, , UserPattern
-    GuiControl,, Pattern, % user_pattern
+UserPatternOnChange:
+    if (App.PatternGroup == 3) {
+        GuiControlGet, user_pattern, , UserPattern
+        GuiControl,, Pattern, % user_pattern
+    }
 Return
 
 Initialize:
@@ -131,24 +135,37 @@ Scan:
     GuiControlGet, tesseract_path, , TesseractPath
     GuiControlGet, output_path, , OutputPath
     GuiControlGet, search_pattern, , Pattern
+    GuiControlGet, samsung, , PatternGroup1
     GuiControlGet, interact, , InteractOption
     GuiControlGet, open_result, , ExecResult
     if (tesseract_path) {
-        tesseract_path := Format("-t ""{1}"" ", tesseract_path)
+        tesseract_option := Format("-t ""{1}"" ", tesseract_path)
     }
     if (output_path) {
-        output_path := Format("-o ""{1}"" ", output_path)
+        FormatTime, start_date, , yyyyMMdd_HHmmss
+        output_path := StrReplace(output_path . "\", "\\", "\") . "output_" . start_date . ".xlsx"
+        output_option := Format("-o ""{1}"" ", output_path)
     }
     if (search_pattern) {
-        search_pattern := Format("-p ""{1}"" ", StrReplace(search_pattern, "\", "\\"))
+        search_pattern_option := Format("-p ""{1}"" ", StrReplace(search_pattern, "\", "\\"))
+    }
+    if (samsung > 0) {
+        samsung := "--samsung "
+    } else {
+        samsung := ""
     }
     if (interact > 0) {
         interact := "-i "
     } else {
         interact := ""
     }
-    command := Format(App.Scanner . " {2}{3}{4}{5}""{1}""", image_dir, tesseract_path, output_path, search_pattern, interact)
-    Log(command . "`r`n")
+
+    Log(Format("[스캔 시작]: {1}", image_dir))
+    Log(Format(" *결과 파일: {1}", output_path))
+    Log("")
+
+    command := Format(App.BinFile . " {2}{3}{4}{5}{6}""{1}""", image_dir, tesseract_option, output_option, search_pattern_option, samsung, interact)
+    ;Log(command . "`r`n")
     Run, % command
     /*
     if (open_result) {
@@ -174,8 +191,8 @@ GetClientSize(hWnd, ByRef w := "", ByRef h := "") {
 
 Log(str) {
     str .= "`r`n"
-    if (hwndCtrl_Log) {
-        AppendText(hwndCtrl_Log, &str)
+    if (hLog) {
+        AppendText(hLog, &str)
     }
 }
 
