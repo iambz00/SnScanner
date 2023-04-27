@@ -16,7 +16,7 @@ EnvGet, LocalAppData, LOCALAPPDATA
 Global App := {}
 App.FullName := "Serial Number Scanner GUI"
 App.ShortName := "SnScanner"
-App.Version := "20230426"
+App.Version := "20230427"
 App.WinTitle := Format("{1} v{2}", App.FullName, App.Version)
 
 App.BinPath := LocalAppData
@@ -83,7 +83,7 @@ Return
 
 SetImageDir:
     GuiControlGet, image_dir, , ImageDir
-    FileSelectFolder, dir, *%A_WorkingDir%, 2, 이미지가 있는 폴더를 지정'
+    FileSelectFolder, dir, *%A_WorkingDir%, 2, 이미지가 있는 폴더를 지정
     if (dir) {
         GuiControl,, ImageDir, % dir
     }
@@ -99,11 +99,9 @@ Return
 
 SetOutputPath:
     GuiControlGet, output_path, , OutputPath
-    FileSelectFolder, file, 2, %output_path%, 결과파일 위치, *.xlsx
-    if (file) {
-        file .= ".xlsx"
-        file := StrReplace(file, ".xlsx.xlsx", ".xlsx")
-        GuiControl,, OutputPath, % file
+    FileSelectFolder, dir, 2, %output_path%, 결과파일 위치를 지정
+    if (dir) {
+        GuiControl,, OutputPath, % dir
     }
 Return
 
@@ -183,10 +181,10 @@ Stop:
 Return
 
 GetClientSize(hWnd, ByRef w := "", ByRef h := "") {
-	VarSetCapacity(rect, 16)
-	DllCall("GetClientRect", "ptr", hWnd, "ptr", &rect)
-	w := NumGet(rect, 8, "int")
-	h := NumGet(rect, 12, "int")
+    VarSetCapacity(rect, 16)
+    DllCall("GetClientRect", "ptr", hWnd, "ptr", &rect)
+    w := NumGet(rect, 8, "int")
+    h := NumGet(rect, 12, "int")
 }
 
 Log(str) {
@@ -197,28 +195,28 @@ Log(str) {
 }
 
 LogClear() {
-	GuiControl,, Ctrl_Log,
+    GuiControl,, Ctrl_Log,
 }
 
 AppendText(hEdit, ptrText) {
-	SendMessage, 0x000E, 0, 0,, ahk_id %hEdit% ;WM_GETTEXTLENGTH
-	SendMessage, 0x00B1, ErrorLevel, ErrorLevel,, ahk_id %hEdit% ;EM_SETSEL
-	SendMessage, 0x00C2, False, ptrText,, ahk_id %hEdit% ;EM_REPLACESEL
+    SendMessage, 0x000E, 0, 0,, ahk_id %hEdit% ;WM_GETTEXTLENGTH
+    SendMessage, 0x00B1, ErrorLevel, ErrorLevel,, ahk_id %hEdit% ;EM_SETSEL
+    SendMessage, 0x00C2, False, ptrText,, ahk_id %hEdit% ;EM_REPLACESEL
 }
 
 GuiSize:
-	Gui %hGui%:Default
-	if !horzMargin
-		return
-	ctrlW := A_GuiWidth - horzMargin
-	list = Title,Status,VisText,AllText,Freeze
-	Loop, Parse, list, `,
-		GuiControl, Move, Ctrl_%A_LoopField%, w%ctrlW%
+    Gui %hGui%:Default
+    if !horzMargin
+        return
+    ctrlW := A_GuiWidth - horzMargin
+    list = Title,Status,VisText,AllText,Freeze
+    Loop, Parse, list, `,
+        GuiControl, Move, Ctrl_%A_LoopField%, w%ctrlW%
 Return
 
 Restart:
-	GoSub SaveSettings
-	Reload
+    GoSub SaveSettings
+    Reload
 Return
 
 LoadSettings:
@@ -244,9 +242,9 @@ LoadSettings:
 Return
 
 SaveSettings:
-	WinGetPos, wX, wY
-	IniWrite, % wX, % IniFile, Common, GUI_x
-	IniWrite, % wY, % IniFile, Common, GUI_y
+    WinGetPos, wX, wY
+    IniWrite, % wX, % IniFile, Common, GUI_x
+    IniWrite, % wY, % IniFile, Common, GUI_y
     GuiControlGet, image_dir, , ImageDir
     IniWrite, %image_dir%, %IniFile%, Common, Image_Dir
     GuiControlGet, tesseract_path, , TesseractPath
@@ -259,11 +257,11 @@ SaveSettings:
     IniWrite, %interact%, %IniFile%, Common, Interact
     GuiControlGet, open_result, , ExecResult
     IniWrite, %open_result%, %IniFile%, Common, Execute Result
-;	GoSub LoadSettings
+;    GoSub LoadSettings
 Return
 
 MainWindowGuiClose:
 MainWindowGuiEscape:
-	GoSub SaveSettings
+    GoSub SaveSettings
 ExitApp
 

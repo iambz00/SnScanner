@@ -1,4 +1,4 @@
-import os, sys, re, time
+import os, sys, re, time, traceback, msvcrt
 import cv2, pytesseract
 import numpy as np
 import openpyxl
@@ -6,7 +6,7 @@ import argparse
 from PIL import Image as PILImage
 from PIL import ImageFont, ImageDraw
 
-_VERSION = "20230426"
+_VERSION = "20230427"
 TESSERACT_PATH = "C:/Program Files/Tesseract-OCR/tesseract.exe"
 OUTPUT_FILE = f"output_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
 SERIAL_PATTERN = r'R[A-Z0-9]{10}'
@@ -260,6 +260,20 @@ if __name__ == "__main__":
         print(f"[{tesseract_path}] 경로에 Tesseract가 없습니다.")
         exit(2)
 
-    ss = SnScanner(args.path, tesseract_path=tesseract_path, output_file=output_file,
-                    pattern=pattern, interact=args.interact, samsung=args.samsung)
-    ss.scan()
+    try:
+        ss = SnScanner(args.path, tesseract_path=tesseract_path, output_file=output_file,
+                        pattern=pattern, interact=args.interact, samsung=args.samsung)
+        ss.scan()
+    except KeyboardInterrupt:
+        print("\n\n사용자 중단!")
+    except PermissionError:
+        pass
+    except:
+        traceback.print_exc()
+        print("\n\n오류 발생! 제작자에게 문의바랍니다.")
+    else:
+        print("작업 완료!")
+    finally:
+        print("\n아무 키나 눌러 주세요...", end="", flush=True)
+        msvcrt.getch()
+        print("")
