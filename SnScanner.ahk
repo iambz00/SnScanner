@@ -16,7 +16,7 @@ EnvGet, LocalAppData, LOCALAPPDATA
 Global App := {}
 App.FullName := "Serial Number Scanner GUI"
 App.ShortName := "SnScanner"
-App.Version := "20230427"
+App.Version := "20230518"
 App.WinTitle := Format("{1} v{2}", App.FullName, App.Version)
 
 App.BinPath := LocalAppData
@@ -107,7 +107,7 @@ Return
 
 SetPattern1:
     App.PatternGroup := 1
-    GuiControl,, Pattern, % "R[A-Z0-9]{10}"
+    GuiControl,, Pattern, % "R[A-Z0-9]{9,10}"
 Return
 
 SetPattern2:

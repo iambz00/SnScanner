@@ -6,10 +6,10 @@ import argparse
 from PIL import Image as PILImage
 from PIL import ImageFont, ImageDraw
 
-_VERSION = "20230427"
+_VERSION = "20230518"
 TESSERACT_PATH = "C:/Program Files/Tesseract-OCR/tesseract.exe"
 OUTPUT_FILE = f"output_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
-SERIAL_PATTERN = r'R[A-Z0-9]{10}'
+SERIAL_PATTERN = r'R[A-Z0-9]{9,10}'
 
 class SnScanner:
     def __init__(self, work_dir, tesseract_path="", output_file="", pattern="", interact=False, samsung=False):
@@ -25,6 +25,7 @@ class SnScanner:
             file_dir = os.path.abspath(os.path.dirname(sys.argv[0]))
             self.font = ImageFont.truetype('malgun.ttf', 12)
         self.workbook = openpyxl.Workbook()
+        self.xlFont = openpyxl.styles.Font(name="Consolas")
         self.worksheet = self.workbook.active
         # 결과 파일명
         self.output_file = output_file
@@ -33,11 +34,14 @@ class SnScanner:
         #self.worksheet.append(["파일명", "이미지", "1차인식", "2차인식", "1차신뢰도", "2차신뢰도", "특이사항"])
         self.worksheet.append(["파일명", "이미지", "시리얼", "특이사항"])
         self.workrow = 2    # 엑셀 현재 행
+        file_count = len(os.listdir(self.dir)) - 1  # . .. 제외
         for entry in os.scandir(self.dir):
             if entry.is_file() and not entry.name.startswith('.') and not entry.name.startswith('~'):
-                print("* " + entry.name)
+                print(f"[{self.workrow-1:03d}/{file_count:03d}] {entry.name}")
                 self.scan_file(entry.name)
+        self.save_excel()
 
+    def save_excel(self):
         # 컬럼 폭 조정
         for column in self.worksheet.columns:
             length = max(len(str(cell.value)) for cell in column)
@@ -45,9 +49,8 @@ class SnScanner:
         self.worksheet.column_dimensions['B'].width = 24
 
         # 시리얼번호는 고정폭인 Consolas로 설정
-        consolas = openpyxl.styles.Font(name="Consolas")
-        for cell in self.worksheet['C:C']: cell.font = consolas
-        for cell in self.worksheet['D:D']: cell.font = consolas
+        for cell in self.worksheet['C:C']: cell.font = self.xlFont
+        for cell in self.worksheet['D:D']: cell.font = self.xlFont
         self.workbook.save(self.output_file)
     def scan_file(self, file):
         '''
@@ -147,47 +150,51 @@ class SnScanner:
 
         # 2차 인식
         for (i, text, conf) in sn_candidate:
-            # Bounding box를 구한다 - left, top, width, height
-            l,t,w,h = result['left'][i], result['top'][i], result['width'][i], result['height'][i]
-            print(text + " > ", end="", flush=True)
+            try:
+                # Bounding box를 구한다 - left, top, width, height
+                l,t,w,h = result['left'][i], result['top'][i], result['width'][i], result['height'][i]
+                print(text + " > ", end="", flush=True)
 
-            # Bounding box 외부로 여유공간이 있어야 인식이 잘 되므로
-            # 상하좌우 4px 씩 더 가져온 후
-            image_height, image_width, _ = image.shape
-            crop = image[max(0, t-4):min(t+h+4, image_height-1), max(0, l-4):min(l+w+4, image_width-1)]
-            original_crop = original_image[max(0, t-4):min(t+h+4, image_height-1), max(0, l-4):min(l+w+4, image_width-1)]
-            rows, cols, _ = crop.shape
+                # Bounding box 외부로 여유공간이 있어야 인식이 잘 되므로
+                # 상하좌우 4px 씩 더 가져온 후
+                image_height, image_width, _ = image.shape
+                crop = image[max(0, t-4):min(t+h+4, image_height-1), max(0, l-4):min(l+w+4, image_width-1)]
+                original_crop = original_image[max(0, t-4):min(t+h+4, image_height-1), max(0, l-4):min(l+w+4, image_width-1)]
+                rows, cols, _ = crop.shape
 
-            # 좌상단 픽셀과 같은 색으로 외부를 32픽셀씩 둘러싸준다
-            newpage = np.ones( (rows+64)*(cols+64)*3, np.uint8).reshape(rows+64, cols+64, 3)
-            newpage[:] = crop[0,0]
-            newpage[32:32+rows, 32:32+cols, :] = crop
+                # 좌상단 픽셀과 같은 색으로 외부를 32픽셀씩 둘러싸준다
+                newpage = np.ones( (rows+64)*(cols+64)*3, np.uint8).reshape(rows+64, cols+64, 3)
+                newpage[:] = crop[0,0]
+                newpage[32:32+rows, 32:32+cols, :] = crop
 
-            # 인식
-            #newtext = pytesseract.image_to_string(newpage, lang="eng", config='--oem 3 --psm 7').strip().replace("O","0").replace("\n","")
-            result2 = pytesseract.image_to_data(newpage, lang="eng", output_type=pytesseract.Output().DICT, config='--oem 3 --psm 7')
-            text_index = result2['word_num'].index(1)
-            newtext = self.refineSN(result2['text'][text_index])
-            newconf = result2['conf'][text_index]
+                # 인식
+                #newtext = pytesseract.image_to_string(newpage, lang="eng", config='--oem 3 --psm 7').strip().replace("O","0").replace("\n","")
+                result2 = pytesseract.image_to_data(newpage, lang="eng", output_type=pytesseract.Output().DICT, config='--oem 3 --psm 7')
+                text_index = result2['word_num'].index(1)
+                newtext = self.refineSN(result2['text'][text_index])
+                newconf = result2['conf'][text_index]
 
-            fittext = newtext
-            note = ""
-            if text != fittext:
-                if len(text) < len(fittext):
-                    fittext = text
-                #note = "확인 필요"
-
-            # 출력
-            print(fittext, note)
-            #self.worksheet.append([file, "", text, newtext, conf, newconf, note])
-            self.worksheet.append([file, "", fittext, note])
-            pilImage = self.toPILImage(original_crop)
-            if pilImage:
-                xlImage = openpyxl.drawing.image.Image(pilImage)
-                self.worksheet.add_image(xlImage, 'B' + str(self.workrow))
-            else:
-                self.worksheet['B' + str(self.workrow)] = "직접 확인해 주세요"
-            self.workrow += 1
+                fittext = newtext
+                note = ""
+                if text != fittext:
+                    if len(text) < len(fittext):
+                        fittext = text
+                    #note = "확인 필요"
+            except:
+                fittext = text
+                note = "오류 발생"
+            finally:
+                # 출력
+                print(fittext, note)
+                #self.worksheet.append([file, "", text, newtext, conf, newconf, note])
+                self.worksheet.append([file, "", fittext, note])
+                pilImage = self.toPILImage(original_crop)
+                if pilImage:
+                    xlImage = openpyxl.drawing.image.Image(pilImage)
+                    self.worksheet.add_image(xlImage, 'B' + str(self.workrow))
+                else:
+                    self.worksheet['B' + str(self.workrow)] = "직접 확인해 주세요"
+                self.workrow += 1
 
         # 그레이스케일로도 인식이 안되었으면
         if not sn_candidate:
@@ -227,9 +234,15 @@ class SnScanner:
     def imshow(self, *imgs, title='test'):
         i = 1
         for img in imgs:
-            if title == "test":
-                title += str(i)
-            cv2.imshow(title, img)
+            WIDTH, HEIGHT = int(0.8 * self.screenW), int(0.8 * self.screenH)
+            h, w, _ = img.shape
+            f = min(HEIGHT / h, WIDTH / w, 1)
+            if f < 1:
+                box_image = cv2.resize(img, (int(f * w), int(f * h)), cv2.INTER_LANCZOS4)
+            else:
+                box_image = img.copy()
+
+            cv2.imshow(title + str(i), img)
             i += 1
         cv2.waitKey(0)
         cv2.destroyAllWindows()
